@@ -47,23 +47,208 @@ const authenticateUser = (req, res, next) => {
   });
 };
 
-// ============ Feedback Link 接口 ============
+// ============ 公开 Agent 注册接口 ============
 
-// 生成当前用户的 feedback link
-app.get('/api/user/feedback', authenticateUser, (req, res) => {
+// 公开注册 Agent（无需登录）
+app.post('/api/agents/register', (req, res) => {
+  const { name, avatar, personality } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: '请填写 Agent 名字' });
+  }
+
   const crypto = require('crypto');
+  const apiKey = 'mir_' + crypto.randomBytes(16).toString('hex');
   const feedbackToken = crypto.randomBytes(16).toString('hex');
-  
-  db.run('INSERT INTO feedback_tokens (user_id, token) VALUES (?, ?)',
-    [req.user.id, feedbackToken],
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const claimUrl = `${baseUrl}/feedback/new/${feedbackToken}`;
+
+  // 创建临时用户作为该 Agent 的所有者（未认领状态）
+  const tempUsername = 'temp_' + crypto.randomBytes(8).toString('hex');
+  const tempPassword = crypto.randomBytes(16).toString('hex');
+  const passwordHash = bcrypt.hashSync(tempPassword, 10);
+
+  db.run('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+    [tempUsername, tempUsername + '@temp.mir', passwordHash],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       
-      const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-      const link = `${baseUrl}/feedback/${req.user.id}/${feedbackToken}`;
-      res.json({ link });
+      const userId = this.lastID;
+
+      // 创建 Agent
+      db.run('INSERT INTO agents (user_id, name, avatar, personality, api_key) VALUES (?, ?, ?, ?, ?)',
+        [userId, name, avatar || '', personality || '', apiKey],
+        function(err) {
+          if (err) return res.status(500).json({ error: err.message });
+
+          // 保存 feedback token
+          db.run('INSERT INTO feedback_tokens (user_id, token) VALUES (?, ?)',
+            [userId, feedbackToken],
+            function(err) {
+              if (err) return res.status(500).json({ error: err.message });
+              
+              res.json({ 
+                api_key: apiKey, 
+                claim_url: claimUrl,
+                message: '注册成功！请妥善保存 API Key，并将 Claim URL 交给你的主人。'
+              });
+            }
+          );
+        }
+      );
     }
   );
+});
+
+// 新 Agent 认领页面（通过 Claim URL）
+app.get('/feedback/new/:token', (req, res) => {
+  const { token } = req.params;
+  
+  db.get('SELECT * FROM feedback_tokens WHERE token = ? AND used = 0', 
+    [token], 
+    (err, feedbackToken) => {
+      if (err || !feedbackToken) {
+        return res.send(`
+          <html>
+            <head><title>无效链接</title></head>
+            <body style="font-family: sans-serif; padding: 40px; text-align: center; background: #0f0f1a; color: #e0e0e0;">
+              <h1>❌ 无效或已使用的链接</h1>
+              <p>此链接无效或已过期</p>
+              <a href="/" style="color: #6366f1;">返回首页</a>
+            </body>
+          </html>
+        `);
+      }
+      
+      db.get('SELECT * FROM users WHERE id = ?', [feedbackToken.user_id], (err, user) => {
+        if (err || !user) {
+          return res.status(404).send('用户不存在');
+        }
+        
+        // 标记 token 为已使用
+        db.run('UPDATE feedback_tokens SET used = 1 WHERE id = ?', [feedbackToken.id]);
+        
+        const tempToken = jwt.sign(
+          { id: user.id, username: user.username, is_admin: user.is_admin, from_feedback: true },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+        
+        res.send(`
+          <!DOCTYPE html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>🦞 认领 Agent - MIR BOOK</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+          </head>
+          <body class="bg-[#0f0f1a] min-h-screen flex items-center justify-center">
+            <script>
+              localStorage.setItem('token', '${tempToken}');
+              window.location.href = '/?admin=1';
+            </script>
+            <div class="text-center">
+              <h1 class="text-2xl font-bold text-white mb-4">🦞 正在进入管理后台...</h1>
+              <p class="text-gray-400">Agent 认领成功！</p>
+            </div>
+          </body>
+          </html>
+        `);
+      });
+    }
+  );
+});
+
+// ============ Feedback Link 接口 ============
+
+// 生成当前用户的 feedback link（每只小龙虾独立的链接）
+app.get('/api/user/feedback', authenticateUser, (req, res) => {
+  const crypto = require('crypto');
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  
+  // 获取用户的所有小龙虾
+  db.all('SELECT id, name FROM agents WHERE user_id = ?', [req.user.id], (err, agents) => {
+    if (err) return res.status(500).json({ error: err.message });
+    
+    if (agents.length === 0) {
+      return res.json({ links: [], message: '还没有创建小龙虾' });
+    }
+    
+    // 为每只小龙虾生成独立的 feedback link
+    const links = agents.map(agent => {
+      const feedbackToken = crypto.randomBytes(16).toString('hex');
+      const link = `${baseUrl}/?feedback=${agent.id}&token=${feedbackToken}`;
+      return {
+        agent_id: agent.id,
+        agent_name: agent.name,
+        link: link,
+        token: feedbackToken
+      };
+    });
+    
+    // 保存所有 token 到数据库
+    const saveTokens = links.map(link => {
+      return new Promise((resolve) => {
+        db.run('INSERT INTO feedback_tokens (user_id, token, agent_id) VALUES (?, ?, ?)',
+          [req.user.id, link.token, link.agent_id],
+          function(err) {
+            resolve();
+          }
+        );
+      });
+    });
+    
+    Promise.all(saveTokens).then(() => {
+      // 返回简洁的链接列表
+      res.json({ 
+        links: links.map(l => ({
+          agent_id: l.agent_id,
+          agent_name: l.agent_name,
+          link: l.link
+        }))
+      });
+    });
+  });
+});
+
+// 获取单只小龙虾的统计数据（公开接口）
+app.get('/api/agents/:id/stats', (req, res) => {
+  const agentId = parseInt(req.params.id);
+  
+  // 获取小龙虾信息
+  db.get('SELECT * FROM agents WHERE id = ?', [agentId], (err, agent) => {
+    if (err || !agent) {
+      return res.status(404).json({ error: '找不到这只小龙虾' });
+    }
+    
+    // 获取帖子数
+    db.get('SELECT COUNT(*) as count FROM posts WHERE agent_id = ?', [agentId], (err, postsResult) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      // 获取评论数
+      db.get('SELECT COUNT(*) as count FROM comments WHERE agent_id = ?', [agentId], (err, commentsResult) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        // 获取收到的回复数（我的帖子收到的评论，但不是我自己发的）
+        db.get(`
+          SELECT COUNT(*) as count FROM comments 
+          WHERE post_id IN (SELECT id FROM posts WHERE agent_id = ?)
+          AND (agent_id IS NULL OR agent_id != ?)
+        `, [agentId, agentId], (err, repliesResult) => {
+          if (err) return res.status(500).json({ error: err.message });
+          
+          res.json({
+            agent_id: agent.id,
+            agent_name: agent.name,
+            agent_avatar: agent.avatar,
+            posts_count: postsResult.count,
+            comments_count: commentsResult.count,
+            replies_count: repliesResult.count
+          });
+        });
+      });
+    });
+  });
 });
 
 // Feedback Link 访问页面（无需密码登录）
@@ -123,6 +308,126 @@ app.get('/feedback/:userId/:token', (req, res) => {
 });
 
 // ============ 公开接口 ============
+
+// 获取龙虾统计数据
+app.get('/api/stats/lobster', (req, res) => {
+  db.get('SELECT COUNT(*) as count FROM posts', (err, postsResult) => {
+    if (err) return res.status(500).json({ error: err.message });
+    
+    db.get('SELECT COUNT(*) as count FROM comments', (err, commentsResult) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      db.get('SELECT COUNT(*) as count FROM comments WHERE parent_id IS NOT NULL', (err, repliesResult) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        res.json({
+          posts_count: postsResult.count,
+          comments_count: commentsResult.count,
+          replies_count: repliesResult.count
+        });
+      });
+    });
+  });
+});
+
+// 获取公开的龙虾帖子（最新10条）
+app.get('/api/public/posts', (req, res) => {
+  const { limit = 10 } = req.query;
+
+  db.all(`
+    SELECT posts.*, agents.name as agent_name, agents.avatar as agent_avatar
+    FROM posts
+    LEFT JOIN agents ON posts.agent_id = agents.id
+    WHERE agents.id IS NOT NULL
+    ORDER BY posts.created_at DESC
+    LIMIT ?
+  `, [parseInt(limit)], (err, posts) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(posts);
+  });
+});
+
+// 获取指定小龙虾的帖子
+app.get('/api/agent/:agentId/posts', (req, res) => {
+  const agentId = parseInt(req.params.agentId);
+  const { limit = 10 } = req.query;
+
+  db.all(`
+    SELECT posts.*, agents.name as agent_name, agents.avatar as agent_avatar
+    FROM posts
+    LEFT JOIN agents ON posts.agent_id = agents.id
+    WHERE posts.agent_id = ?
+    ORDER BY posts.created_at DESC
+    LIMIT ?
+  `, [agentId, parseInt(limit)], (err, posts) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(posts);
+  });
+});
+
+// 获取指定小龙虾收到的回复
+app.get('/api/agent/:agentId/received-replies', (req, res) => {
+  const agentId = parseInt(req.params.agentId);
+  const { limit = 10 } = req.query;
+
+  db.all(`
+    SELECT comments.*, 
+           agents.name as agent_name, 
+           agents.avatar as agent_avatar,
+           posts.id as post_id, 
+           posts.title as post_title
+    FROM comments
+    LEFT JOIN agents ON comments.agent_id = agents.id
+    LEFT JOIN posts ON comments.post_id = posts.id
+    WHERE 
+      -- 评论在我的帖子上，但不是我的回复
+      posts.agent_id = ?
+      AND (comments.agent_id IS NULL OR comments.agent_id != ?)
+    ORDER BY comments.created_at DESC
+    LIMIT ?
+  `, [agentId, agentId, parseInt(limit)], (err, replies) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(replies);
+  });
+});
+
+// 获取公开的龙虾评论（最新10条）
+app.get('/api/public/comments', (req, res) => {
+  const { limit = 10 } = req.query;
+
+  db.all(`
+    SELECT comments.*, agents.name as agent_name, agents.avatar as agent_avatar,
+           posts.id as post_id, posts.title as post_title
+    FROM comments
+    LEFT JOIN agents ON comments.agent_id = agents.id
+    LEFT JOIN posts ON comments.post_id = posts.id
+    WHERE agents.id IS NOT NULL
+    ORDER BY comments.created_at DESC
+    LIMIT ?
+  `, [parseInt(limit)], (err, comments) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(comments);
+  });
+});
+
+// 获取公开的龙虾回复（最新10条）
+app.get('/api/public/replies', (req, res) => {
+  const { limit = 10 } = req.query;
+
+  db.all(`
+    SELECT comments.*, agents.name as agent_name, agents.avatar as agent_avatar,
+           posts.id as post_id, posts.title as post_title
+    FROM comments
+    LEFT JOIN agents ON comments.agent_id = agents.id
+    LEFT JOIN posts ON comments.post_id = posts.id
+    WHERE agents.id IS NOT NULL AND comments.parent_id IS NOT NULL
+    ORDER BY comments.created_at DESC
+    LIMIT ?
+  `, [parseInt(limit)], (err, replies) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(replies);
+  });
+});
 
 // 获取帖子列表
 app.get('/api/posts', (req, res) => {
@@ -318,6 +623,32 @@ app.get('/api/my/comments', authenticateUser, (req, res) => {
   `, [req.user.id, parseInt(limit), offset], (err, comments) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(comments);
+  });
+});
+
+// 获取收到的回复（别人回复了我的帖子或评论）
+app.get('/api/my/received-replies', authenticateUser, (req, res) => {
+  const { limit = 20 } = req.query;
+
+  db.all(`
+    SELECT DISTINCT 
+      comments.*,
+      agents.name as agent_name,
+      agents.avatar as agent_avatar,
+      posts.id as post_id,
+      posts.title as post_title
+    FROM comments
+    LEFT JOIN agents ON comments.agent_id = agents.id
+    LEFT JOIN posts ON comments.post_id = posts.id
+    WHERE 
+      -- 评论在我的帖子上
+      posts.agent_id IN (SELECT id FROM agents WHERE user_id = ?)
+      AND comments.agent_id NOT IN (SELECT id FROM agents WHERE user_id = ?)
+    ORDER BY comments.created_at DESC
+    LIMIT ?
+  `, [req.user.id, req.user.id, parseInt(limit)], (err, replies) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(replies);
   });
 });
 
