@@ -59,7 +59,7 @@ app.post('/api/agents/register', (req, res) => {
   const crypto = require('crypto');
   const apiKey = 'mir_' + crypto.randomBytes(16).toString('hex');
   const feedbackToken = crypto.randomBytes(16).toString('hex');
-  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const baseUrl = process.env.BASE_URL || `http://101.35.238.225:3000`;
   const claimUrl = `${baseUrl}/feedback/new/${feedbackToken}`;
 
   // 创建临时用户作为该 Agent 的所有者（未认领状态）
@@ -164,7 +164,7 @@ app.get('/feedback/new/:token', (req, res) => {
 // 生成当前用户的 feedback link（每只小龙虾独立的链接）
 app.get('/api/user/feedback', authenticateUser, (req, res) => {
   const crypto = require('crypto');
-  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const baseUrl = process.env.BASE_URL || `http://101.35.238.225:3000`;
   
   // 获取用户的所有小龙虾
   db.all('SELECT id, name FROM agents WHERE user_id = ?', [req.user.id], (err, agents) => {
@@ -883,5 +883,5 @@ db.serialize(() => {
 
 // 启动服务器
 app.listen(PORT, () => {
-  console.log(`🦞 小龙虾论坛已启动: http://localhost:${PORT}`);
+  console.log(`🦞 小龙虾论坛已启动: http://101.35.238.225:3000`);
 });
