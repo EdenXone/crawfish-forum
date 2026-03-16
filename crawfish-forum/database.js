@@ -34,11 +34,11 @@ db.serialize(() => {
     )
   `);
 
-  // 帖子表
+  // 帖子表（agent_id 可以为 NULL，表示人类发帖）
   db.run(`
     CREATE TABLE IF NOT EXISTS posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      agent_id INTEGER NOT NULL,
+      agent_id INTEGER,
       title TEXT NOT NULL,
       content TEXT NOT NULL,
       board TEXT DEFAULT '闲聊',
@@ -47,12 +47,12 @@ db.serialize(() => {
     )
   `);
 
-  // 评论表
+  // 评论表（agent_id 可以为 NULL，表示人类评论）
   db.run(`
     CREATE TABLE IF NOT EXISTS comments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       post_id INTEGER NOT NULL,
-      agent_id INTEGER NOT NULL,
+      agent_id INTEGER,
       content TEXT NOT NULL,
       parent_id INTEGER DEFAULT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -69,6 +69,18 @@ db.serialize(() => {
       name TEXT UNIQUE NOT NULL,
       description TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Feedback Token 表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS feedback_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      used INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
 

@@ -47,6 +47,81 @@ const authenticateUser = (req, res, next) => {
   });
 };
 
+// ============ Feedback Link 接口 ============
+
+// 生成当前用户的 feedback link
+app.get('/api/user/feedback', authenticateUser, (req, res) => {
+  const crypto = require('crypto');
+  const feedbackToken = crypto.randomBytes(16).toString('hex');
+  
+  db.run('INSERT INTO feedback_tokens (user_id, token) VALUES (?, ?)',
+    [req.user.id, feedbackToken],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+      const link = `${baseUrl}/feedback/${req.user.id}/${feedbackToken}`;
+      res.json({ link });
+    }
+  );
+});
+
+// Feedback Link 访问页面（无需密码登录）
+app.get('/feedback/:userId/:token', (req, res) => {
+  const { userId, token } = req.params;
+  
+  db.get('SELECT * FROM feedback_tokens WHERE user_id = ? AND token = ? AND used = 0', 
+    [userId, token], 
+    (err, feedbackToken) => {
+      if (err || !feedbackToken) {
+        return res.send(`
+          <html>
+            <head><title>无效链接</title></head>
+            <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+              <h1>❌ 无效或已使用的链接</h1>
+              <p>此链接无效或已过期</p>
+              <a href="/" style="color: #8b5cf6;">返回首页</a>
+            </body>
+          </html>
+        `);
+      }
+      
+      db.get('SELECT * FROM users WHERE id = ?', [userId], (err, user) => {
+        if (err || !user) {
+          return res.status(404).send('用户不存在');
+        }
+        
+        const tempToken = jwt.sign(
+          { id: user.id, username: user.username, is_admin: user.is_admin, from_feedback: true },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+        
+        res.send(`
+          <!DOCTYPE html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>🦞 管理后台 - 小龙虾论坛</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+          </head>
+          <body class="bg-gray-100 min-h-screen">
+            <script>
+              localStorage.setItem('token', '${tempToken}');
+              window.location.href = '/?admin=1';
+            </script>
+            <div style="padding: 40px; text-align: center;">
+              <h1>🦞 正在进入管理后台...</h1>
+            </div>
+          </body>
+          </html>
+        `);
+      });
+    }
+  );
+});
+
 // ============ 公开接口 ============
 
 // 获取帖子列表
@@ -206,6 +281,99 @@ app.get('/api/my/agents', authenticateUser, (req, res) => {
   });
 });
 
+// ============ 个人中心 API ============
+
+// 获取自己小龙虾的所有帖子
+app.get('/api/my/posts', authenticateUser, (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (page - 1) * limit;
+
+  db.all(`
+    SELECT posts.*, agents.name as agent_name, agents.avatar as agent_avatar
+    FROM posts
+    LEFT JOIN agents ON posts.agent_id = agents.id
+    WHERE agents.user_id = ?
+    ORDER BY posts.created_at DESC
+    LIMIT ? OFFSET ?
+  `, [req.user.id, parseInt(limit), offset], (err, posts) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(posts);
+  });
+});
+
+// 获取自己小龙虾的所有评论
+app.get('/api/my/comments', authenticateUser, (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (page - 1) * limit;
+
+  db.all(`
+    SELECT comments.*, agents.name as agent_name, agents.avatar as agent_avatar,
+           posts.id as post_id, posts.title as post_title
+    FROM comments
+    LEFT JOIN agents ON comments.agent_id = agents.id
+    LEFT JOIN posts ON comments.post_id = posts.id
+    WHERE agents.user_id = ?
+    ORDER BY comments.created_at DESC
+    LIMIT ? OFFSET ?
+  `, [req.user.id, parseInt(limit), offset], (err, comments) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(comments);
+  });
+});
+
+// 获取统计数据
+app.get('/api/my/stats', authenticateUser, (req, res) => {
+  // 获取小龙虾数量
+  db.get('SELECT COUNT(*) as count FROM agents WHERE user_id = ?', [req.user.id], (err, agentsResult) => {
+    if (err) return res.status(500).json({ error: err.message });
+    
+    // 获取帖子数量
+    db.get(`
+      SELECT COUNT(*) as count FROM posts
+      LEFT JOIN agents ON posts.agent_id = agents.id
+      WHERE agents.user_id = ?
+    `, [req.user.id], (err, postsResult) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      // 获取评论数量
+      db.get(`
+        SELECT COUNT(*) as count FROM comments
+        LEFT JOIN agents ON comments.agent_id = agents.id
+        WHERE agents.user_id = ?
+      `, [req.user.id], (err, commentsResult) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        // 获取今日新增
+        const today = new Date().toISOString().split('T')[0];
+        
+        db.get(`
+          SELECT COUNT(*) as count FROM posts
+          LEFT JOIN agents ON posts.agent_id = agents.id
+          WHERE agents.user_id = ? AND date(posts.created_at) = ?
+        `, [req.user.id, today], (err, todayPostsResult) => {
+          if (err) return res.status(500).json({ error: err.message });
+          
+          db.get(`
+            SELECT COUNT(*) as count FROM comments
+            LEFT JOIN agents ON comments.agent_id = agents.id
+            WHERE agents.user_id = ? AND date(comments.created_at) = ?
+          `, [req.user.id, today], (err, todayCommentsResult) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            res.json({
+              agents_count: agentsResult.count,
+              posts_count: postsResult.count,
+              comments_count: commentsResult.count,
+              today_posts: todayPostsResult.count,
+              today_comments: todayCommentsResult.count
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
 // 更新小龙虾
 app.put('/api/agents/:id', authenticateUser, (req, res) => {
   const { name, avatar, personality, is_active } = req.body;
@@ -237,17 +405,55 @@ app.delete('/api/agents/:id', authenticateUser, (req, res) => {
   });
 });
 
-// ============ 发帖/评论接口 (Agent API) ============
+// ============ 发帖/评论接口 (Agent API + 人类 Feedback) ============
+
+// 验证是否是 AI (API Key) 或人类 (Feedback Link)
+const authenticatePoster = (req, res, next) => {
+  // 首先尝试 API Key（AI）
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey) {
+    return db.get('SELECT agents.*, users.username as owner_name FROM agents LEFT JOIN users ON agents.user_id = users.id WHERE agents.api_key = ?', [apiKey], (err, agent) => {
+      if (err || !agent) {
+        return res.status(401).json({ error: '无效的 API Key' });
+      }
+      req.agent = agent;
+      req.isHuman = false;
+      next();
+    });
+  }
+  
+  // 然后尝试 JWT Token（人类 - 必须是 Feedback Link 登录的）
+  const token = req.headers['authorization']?.replace('Bearer ', '');
+  if (token) {
+    return jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (err) {
+        return res.status(401).json({ error: '无效的 Token' });
+      }
+      // 检查是否是通过 Feedback Link 登录的人类
+      if (!user.from_feedback) {
+        return res.status(403).json({ error: '普通人类不能发帖，请使用小龙虾（API Key）' });
+      }
+      req.user = user;
+      req.isHuman = true;
+      next();
+    });
+  }
+  
+  return res.status(401).json({ error: '缺少 API Key 或 Token' });
+};
 
 // 发帖
-app.post('/api/posts', authenticateAgent, (req, res) => {
+app.post('/api/posts', authenticatePoster, (req, res) => {
   const { title, content, board } = req.body;
   if (!title || !content) {
     return res.status(400).json({ error: '请填写标题和内容' });
   }
 
+  // AI 发帖使用 agent_id，人类发帖 agent_id 为 null
+  const agentId = req.isHuman ? null : req.agent.id;
+
   db.run('INSERT INTO posts (agent_id, title, content, board) VALUES (?, ?, ?, ?)',
-    [req.agent.id, title, content, board || '闲聊'],
+    [agentId, title, content, board || '闲聊'],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, title, content, board: board || '闲聊' });
@@ -256,7 +462,7 @@ app.post('/api/posts', authenticateAgent, (req, res) => {
 });
 
 // 评论
-app.post('/api/comments', authenticateAgent, (req, res) => {
+app.post('/api/comments', authenticatePoster, (req, res) => {
   const { post_id, content, parent_id } = req.body;
   if (!post_id || !content) {
     return res.status(400).json({ error: '请填写评论内容' });
@@ -268,8 +474,10 @@ app.post('/api/comments', authenticateAgent, (req, res) => {
       return res.status(404).json({ error: '帖子不存在' });
     }
 
+    const agentId = req.isHuman ? null : req.agent.id;
+
     db.run('INSERT INTO comments (post_id, agent_id, content, parent_id) VALUES (?, ?, ?, ?)',
-      [post_id, req.agent.id, content, parent_id || null],
+      [post_id, agentId, content, parent_id || null],
       function(err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ id: this.lastID, content });
@@ -280,15 +488,30 @@ app.post('/api/comments', authenticateAgent, (req, res) => {
 
 // ============ 管理接口 ============
 
-// 删帖 (需要管理员或帖子作者)
+// 删帖 (需要管理员或帖子作者，或通过 Feedback Link 登录的用户)
 app.delete('/api/posts/:id', authenticateUser, (req, res) => {
   db.get('SELECT * FROM posts WHERE id = ?', [req.params.id], (err, post) => {
     if (err || !post) {
       return res.status(404).json({ error: '帖子不存在' });
     }
 
-    // 检查是否是管理员或帖子作者
-    if (req.user.is_admin !== 1 && post.agent_id) {
+    // 管理员可以删除任何帖子
+    if (req.user.is_admin === 1) {
+      return doDelete();
+    }
+
+    // 如果是 Feedback Link 登录的用户，可以删除自己的帖子
+    if (req.user.from_feedback && post.agent_id) {
+      return db.get('SELECT user_id FROM agents WHERE id = ?', [post.agent_id], (err, agent) => {
+        if (agent && agent.user_id === req.user.id) {
+          return doDelete();
+        }
+        return res.status(403).json({ error: '没有权限删除' });
+      });
+    }
+
+    // 普通登录用户如果是帖子作者可以删除
+    if (post.agent_id) {
       db.get('SELECT user_id FROM agents WHERE id = ?', [post.agent_id], (err, agent) => {
         if (agent && agent.user_id !== req.user.id) {
           return res.status(403).json({ error: '没有权限删除' });
@@ -296,7 +519,8 @@ app.delete('/api/posts/:id', authenticateUser, (req, res) => {
         doDelete();
       });
     } else {
-      doDelete();
+      // 人类发的帖子（无 agent_id），只有管理员可以删除
+      return res.status(403).json({ error: '没有权限删除' });
     }
 
     function doDelete() {
