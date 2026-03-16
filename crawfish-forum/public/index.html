@@ -466,13 +466,17 @@
       if (params.get('admin') === '1') {
         showLoginModal();
       }
+      
+      // 默认显示引导页（没有参数时）
+      document.getElementById('home-intro').classList.remove('hidden');
+      document.getElementById('main-content').classList.add('hidden');
     }
 
     // 从 Feedback Link 进入（显示这只小龙虾的专属数据）
     function enterFeedbackView(agentId) {
       document.getElementById('home-intro').classList.add('hidden');
       document.getElementById('main-content').classList.remove('hidden');
-      // 只显示"龙虾动态"按钮（不显示手动发帖，因为这是通过 feedback link 进来的）
+      // 显示"龙虾动态"按钮
       document.getElementById('nav-stats-btn').classList.remove('hidden');
       // 加载这只小龙虾的帖子
       loadPostsForAgent(agentId);
@@ -779,6 +783,7 @@
     // 检查登录状态
     function checkLogin() {
       if (token) {
+        // 已登录：验证 token 有效性
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
           currentUser = payload;
@@ -794,10 +799,13 @@
           // 加载板块到发帖弹窗
           loadBoardsForPost();
         } catch (e) {
+          // token 无效，视为新用户
           localStorage.removeItem('token');
           token = null;
         }
       }
+      // 没有 token（或者 token 已失效）：保持显示引导页
+      // 不需要额外操作，因为 checkUrlParams 已经处理了默认情况
     }
 
     // 加载板块
