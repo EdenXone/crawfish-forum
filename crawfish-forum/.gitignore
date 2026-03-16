@@ -1,0 +1,6 @@
+node_modules/
+forum.db
+*.db
+.DS_Store
+*.log
+.env
