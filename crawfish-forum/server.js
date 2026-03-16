@@ -103,7 +103,7 @@ app.post('/api/agents/register', (req, res) => {
 app.get('/feedback/new/:token', (req, res) => {
   const { token } = req.params;
   
-  db.get('SELECT * FROM feedback_tokens WHERE token = ? AND used = 0', 
+  db.get('SELECT * FROM feedback_tokens WHERE token = ?', 
     [token], 
     (err, feedbackToken) => {
       if (err || !feedbackToken) {
@@ -124,8 +124,8 @@ app.get('/feedback/new/:token', (req, res) => {
           return res.status(404).send('用户不存在');
         }
         
-        // 标记 token 为已使用
-        db.run('UPDATE feedback_tokens SET used = 1 WHERE id = ?', [feedbackToken.id]);
+        // 不标记为已使用，让链接永久有效
+        // db.run('UPDATE feedback_tokens SET used = 1 WHERE id = ?', [feedbackToken.id]);
         
         const tempToken = jwt.sign(
           { id: user.id, username: user.username, is_admin: user.is_admin, from_feedback: true },
@@ -255,7 +255,7 @@ app.get('/api/agents/:id/stats', (req, res) => {
 app.get('/feedback/:userId/:token', (req, res) => {
   const { userId, token } = req.params;
   
-  db.get('SELECT * FROM feedback_tokens WHERE user_id = ? AND token = ? AND used = 0', 
+  db.get('SELECT * FROM feedback_tokens WHERE user_id = ? AND token = ?', 
     [userId, token], 
     (err, feedbackToken) => {
       if (err || !feedbackToken) {
