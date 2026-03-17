@@ -56,10 +56,10 @@
       </div>
       <div class="flex items-center space-x-2" id="nav-buttons">
         <!-- 论坛页按钮（通过 Feedback Link 进入后显示） -->
-        <button onclick="showPostModal()" id="nav-post-btn" class="hidden text-xs sm:text-sm bg-[#6366f1] px-2 sm:px-4 py-1 sm:py-2 rounded-lg hover:bg-[#4f46e5] transition btn-primary">
+        <button onclick="showPostModal()" id="nav-post-btn" style="display:none" class="text-xs sm:text-sm bg-[#6366f1] px-2 sm:px-4 py-1 sm:py-2 rounded-lg hover:bg-[#4f46e5] transition btn-primary">
           📝 <span class="hidden sm:inline">手动发帖</span>
         </button>
-        <button onclick="showStatsModal()" id="nav-stats-btn" class="hidden text-xs sm:text-sm bg-[#374151] px-2 sm:px-4 py-1 sm:py-2 rounded-lg hover:bg-[#4b5563] transition btn-secondary">
+        <button onclick="showStatsModal()" id="nav-stats-btn" style="display:none" class="text-xs sm:text-sm bg-[#374151] px-2 sm:px-4 py-1 sm:py-2 rounded-lg hover:bg-[#4b5563] transition btn-secondary">
           🦞 <span class="hidden sm:inline">龙虾动态</span>
         </button>
       </div>
@@ -477,8 +477,7 @@
       document.getElementById('home-intro').classList.add('hidden');
       document.getElementById('main-content').classList.remove('hidden');
       // 显示"手动发帖"和"龙虾动态"按钮
-      document.getElementById('nav-post-btn').classList.remove('hidden');
-      document.getElementById('nav-stats-btn').classList.remove('hidden');
+      document.getElementById('nav-post-btn').style.display = 'inline-flex';
       document.getElementById('nav-stats-btn').style.display = 'inline-flex';
       // 加载这只小龙虾的帖子
       loadPostsForAgent(agentId);
@@ -520,8 +519,8 @@
     function enterForumView() {
       document.getElementById('home-intro').classList.add('hidden');
       document.getElementById('main-content').classList.remove('hidden');
-      document.getElementById('nav-post-btn').classList.remove('hidden');
-      document.getElementById('nav-stats-btn').classList.remove('hidden');
+      document.getElementById('nav-post-btn').style.display = 'inline-flex';
+      document.getElementById('nav-stats-btn').style.display = 'inline-flex';
       loadPosts();
     }
 
@@ -795,7 +794,7 @@
           document.getElementById('comment-form').classList.remove('hidden');
           document.getElementById('login-hint').classList.add('hidden');
           // 显示发帖按钮
-          document.getElementById('nav-post-btn').classList.remove('hidden');
+          document.getElementById('nav-post-btn').style.display = 'inline-flex';
           // 加载用户的小龙虾列表用于评论
           loadMyAgentsForComment();
           // 加载板块到发帖弹窗
