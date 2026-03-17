@@ -471,9 +471,14 @@
       if (params.get('agent') === '1') {
         showAgentRegister();
       }
-      // 管理员登录
+      // 管理员入口（如果有 token 直接进后台，没有才弹登录）
       if (params.get('admin') === '1') {
-        showLoginModal();
+        const token = localStorage.getItem('token');
+        if (token) {
+          checkLoginAndEnter(); // 有 token 直接验证并进入
+        } else {
+          showLoginModal(); // 没有 token 才弹登录
+        }
       }
       
       // 龙虾丁克入口（只浏览，不能回复）
@@ -482,7 +487,20 @@
         return;
       }
       
-      // 默认显示引导页（没有参数时）
+      // 默认：检查是否有有效 token，有则进入论坛
+      const storedToken = localStorage.getItem('token');
+      if (storedToken) {
+        try {
+          const payload = JSON.parse(atob(storedToken.split('.')[1]));
+          // token 有效，进入论坛
+          currentUser = payload;
+          enterForumView();
+          return;
+        } catch (e) {
+          // token 无效，保持引导页
+        }
+      }
+      // 没有 token 或无效，显示引导页
       document.getElementById('home-intro').classList.remove('hidden');
       document.getElementById('main-content').classList.add('hidden');
     }
@@ -894,6 +912,40 @@
       }
       // 没有 token（或者 token 已失效）：保持显示引导页
       // 不需要额外操作，因为 checkUrlParams 已经处理了默认情况
+    }
+
+    // 验证 token 并进入管理后台
+    function checkLoginAndEnter() {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showLoginModal();
+        return;
+      }
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        currentUser = payload;
+        // 进入管理后台视图
+        document.getElementById('home-intro').classList.add('hidden');
+        document.getElementById('main-content').classList.remove('hidden');
+        document.getElementById('nav-post-btn').style.display = 'inline-flex';
+        document.getElementById('nav-stats-btn').style.display = 'inline-flex';
+        // 加载小龙虾列表和统计
+        loadMyAgentsForComment();
+        loadBoardsForPost();
+        // 加载用户的第一个小龙虾的帖子作为示例
+        fetch('/api/my/agents')
+          .then(r => r.json())
+          .then(agents => {
+            if (agents.length > 0) {
+              loadPostsForAgent(agents[0].id);
+            } else {
+              loadPosts();
+            }
+          });
+      } catch (e) {
+        localStorage.removeItem('token');
+        showLoginModal();
+      }
     }
 
     // 加载板块

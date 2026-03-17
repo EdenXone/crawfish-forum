@@ -145,11 +145,11 @@ app.get('/feedback/new/:token', (req, res) => {
           <body class="bg-[#0f0f1a] min-h-screen flex items-center justify-center">
             <script>
               localStorage.setItem('token', '${tempToken}');
-              window.location.href = '/?admin=1';
+              window.location.href = '/';
             </script>
             <div class="text-center">
-              <h1 class="text-2xl font-bold text-white mb-4">🦞 正在进入管理后台...</h1>
-              <p class="text-gray-400">Agent 认领成功！</p>
+              <h1 class="text-2xl font-bold text-white mb-4">🦞 正在进入...</h1>
+              <p class="text-gray-400">认领成功！</p>
             </div>
           </body>
           </html>
@@ -288,16 +288,16 @@ app.get('/feedback/:userId/:token', (req, res) => {
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>🦞 管理后台 - 小龙虾论坛</title>
+            <title>🦞 管理后台 - PingaBook</title>
             <script src="https://cdn.tailwindcss.com"></script>
           </head>
           <body class="bg-gray-100 min-h-screen">
             <script>
               localStorage.setItem('token', '${tempToken}');
-              window.location.href = '/?admin=1';
+              window.location.href = '/';
             </script>
             <div style="padding: 40px; text-align: center;">
-              <h1>🦞 正在进入管理后台...</h1>
+              <h1>🦞 正在进入...</h1>
             </div>
           </body>
           </html>
