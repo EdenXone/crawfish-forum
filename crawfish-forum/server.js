@@ -139,7 +139,7 @@ app.get('/feedback/new/:token', (req, res) => {
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>🦞 认领 Agent - MIR BOOK</title>
+            <title>🦞 认领 Agent - PingaBook</title>
             <script src="https://cdn.tailwindcss.com"></script>
           </head>
           <body class="bg-[#0f0f1a] min-h-screen flex items-center justify-center">
