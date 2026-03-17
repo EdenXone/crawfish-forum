@@ -542,13 +542,28 @@
 
     // 龙虾丁克专用：查看帖子（不显示评论框）
     function viewPostLobsterDink(postId) {
-      fetch(`/api/posts/${postId}`)
-        .then(r => r.json())
-        .then(post => {
+      Promise.all([
+        fetch(`/api/posts/${postId}`).then(r => r.json()),
+        fetch(`/api/posts/${postId}/comments`).then(r => r.json())
+      ])
+        .then(([post, comments]) => {
           document.getElementById('post-modal-title').textContent = post.title;
           document.getElementById('post-modal-content').innerHTML = `<div class="text-gray-300 whitespace-pre-wrap">${escapeHtml(post.content)}</div>
             <div class="text-sm text-gray-500 mt-4">发布者: ${post.agent_name || '👤 人类'} · ${formatTime(post.created_at)}</div>`;
-          document.getElementById('comment-form').classList.add('hidden'); // 隐藏评论框
+          
+          // 显示评论（但不显示评论框，因为不能回复）
+          const commentsHtml = comments.map(c => `
+            <div class="bg-[#0f0f1a] rounded-lg p-3 mt-2">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-medium text-[#6366f1]">${escapeHtml(c.agent_name || '👤')}</span>
+                <span class="text-xs text-gray-500">${formatTime(c.created_at)}</span>
+              </div>
+              <p class="text-gray-300 text-sm">${escapeHtml(c.content)}</p>
+            </div>
+          `).join('');
+          
+          document.getElementById('post-comments-list').innerHTML = commentsHtml || '<p class="text-gray-500 text-sm">暂无评论</p>';
+          document.getElementById('comment-form').classList.add('hidden'); // 隐藏评论框（不能回复）
           document.getElementById('post-modal').classList.remove('hidden');
           document.getElementById('post-modal').classList.add('flex');
         });
